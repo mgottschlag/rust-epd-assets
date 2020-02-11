@@ -26,7 +26,7 @@ impl Font {
         Ok(Font { face: face })
     }
 
-    pub fn generate(&mut self, name: &str, size: isize, subset: &str) -> String {
+    pub fn generate(&mut self, name: &str, size: isize, subset: &str, epd_crate: &str) -> String {
         let mut subset = subset.chars().collect::<Vec<_>>();
         subset.sort();
         // Set the resultion to 72dpi so that a point equals a pixel.
@@ -34,12 +34,12 @@ impl Font {
         // Generate all glyphs.
         let mut glyphs = Vec::new();
         for c in subset.iter() {
-            glyphs.push(self.generate_glyph(*c));
+            glyphs.push(self.generate_glyph(*c, epd_crate));
         }
         // Generate the font.
         let size = self.face.size_metrics().unwrap();
         format!(
-            "pub const {}: crate::epd::gui::font::Font = crate::epd::gui::font::Font {{
+            "pub const {}: {}::gui::font::Font = {}::gui::font::Font {{
     ascender: {},
     descender: {},
     glyphs: &[
@@ -49,6 +49,8 @@ impl Font {
 }};
 ",
             name,
+            epd_crate,
+            epd_crate,
             (size.ascender + 63) / 64,
             -(size.descender + 63) / 64,
             glyphs.join(",\n        "),
@@ -116,7 +118,7 @@ impl Font {
         }
     }
 
-    fn generate_glyph(&mut self, c: char) -> String {
+    fn generate_glyph(&mut self, c: char, epd_crate: &str) -> String {
         self.face
             .load_char(
                 c as usize,
@@ -124,16 +126,17 @@ impl Font {
             )
             .unwrap();
         let glyph = self.face.glyph();
-        let image = Self::generate_rle_image(&glyph.bitmap());
-        assert!(glyph.bitmap_left() >= 0);
+        let image = Self::generate_rle_image(&glyph.bitmap(), epd_crate);
+        //assert!(glyph.bitmap_left() >= 0);
         assert!(glyph.bitmap_top() >= 0);
         format!(
-            "crate::epd::gui::font::Glyph {{
+            "{}::gui::font::Glyph {{
                 image: {},
                 image_left: {},
                 image_top: {},
                 advance: {},
         }}",
+            epd_crate,
             image,
             glyph.bitmap_left(),
             glyph.bitmap_top(),
@@ -141,7 +144,7 @@ impl Font {
         )
     }
 
-    fn generate_rle_image(bm: &freetype::Bitmap) -> String {
+    fn generate_rle_image(bm: &freetype::Bitmap, epd_crate: &str) -> String {
         let buffer = bm.buffer();
         let pitch = bm.pitch() as usize;
         let width = bm.width() as usize;
@@ -169,12 +172,12 @@ impl Font {
         }
         data_text += "\n                    ]";
         format!(
-            "crate::epd::gui::rle::RLEImage {{
+            "{}::gui::image::RLEImage {{
                     data: &{},
                     width: {},
                     height: {},
                 }}",
-            data_text, width, height
+            epd_crate, data_text, width, height
         )
     }
 
