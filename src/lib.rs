@@ -1,16 +1,29 @@
-extern crate freetype;
-
 use std::convert::From;
+use std::io;
 
 #[derive(Debug)]
 pub enum Error {
-    Io(),
+    Io(io::Error),
     Freetype(freetype::Error),
+    Png(lodepng::ffi::Error),
+    UnsupportedFormat,
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Error::Io(error)
+    }
 }
 
 impl From<freetype::Error> for Error {
     fn from(error: freetype::Error) -> Self {
         Error::Freetype(error)
+    }
+}
+
+impl From<lodepng::ffi::Error> for Error {
+    fn from(error: lodepng::ffi::Error) -> Self {
+        Error::Png(error)
     }
 }
 
@@ -202,5 +215,61 @@ impl Font {
             }
         }
         output.push(((run_color as u16) << 15) | run_length);
+    }
+}
+
+pub struct Image {
+    data: Vec<u8>,
+    stride: u32,
+    width: u32,
+    height: u32,
+}
+
+impl Image {
+    pub fn load(path: &str) -> Result<Image, Error> {
+        let image = lodepng::decode32_file(path)?;
+        let width = image.width;
+        let height = image.height;
+        let stride = (width + 7) / 8;
+        let mut data = vec![0u8; (stride * height) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = image.buffer[y * width + x];
+                let avg_color = (pixel.r + pixel.g + pixel.b) / 3;
+                let alpha = pixel.a;
+                let level = (255 - avg_color) as u32 * alpha as u32 / 255;
+                if level < 128 {
+                    data[(y * stride + x / 8) as usize] |= 1 << (x & 7);
+                }
+            }
+        }
+        Ok(Image {
+            data: data,
+            stride: stride as u32,
+            width: width as u32,
+            height: height as u32,
+        })
+    }
+
+    pub fn generate_bitmap(&self, name: &str, epd_crate: &str) -> String {
+        let mut data_str = "[\n".to_string();
+        for i in 0..self.height {
+            data_str += "       ";
+            for j in 0..self.stride {
+                data_str += &format!(" {},", self.data[(i * self.stride + j) as usize]);
+            }
+            data_str += "\n";
+        }
+        data_str += "    ]";
+        format!(
+            "pub const {}: {}::gui::image::BitmapImage = {}::gui::image::BitmapImage {{
+    data: &{},
+    width: {},
+    height: {},
+    stride: {},
+}};
+",
+            name, epd_crate, epd_crate, data_str, self.width, self.height, self.stride,
+        )
     }
 }
